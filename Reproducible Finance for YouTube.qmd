@@ -1,0 +1,377 @@
+---
+title: "Forecasting Stock Prices using Prophet and Keras packages in RStudio"
+format:
+  html: 
+    toc: true
+    anchor-sections: false
+    fig-cap-location: bottom
+    tbl-cap-location: top
+    number-sections: false
+    smooth-scroll: true
+    code-fold: false
+    code-overflow: scroll
+    self-contained: True
+    html-math-method: katex
+    linkcolor: "#007FFF"
+    link-external-newwindow: true
+    output-file: "finance_output2.html"
+    css: style.css
+    page-layout: article
+editor: visual
+---
+
+## 1. Intro
+
+::: row
+In this document, we will be discussing about Prophet and Keras packages in R for stock price forecasting. Brief summary is here:
+
+::: two-columns
+[**Prophet Package in R for Stock Price Forecast**]{style="text-decoration: underline; text-align: center;"}\
+The Prophet package in R, developed by Facebook, is a robust tool designed for time series forecasting, including stock price prediction. It is particularly well-suited for datasets with daily observations and provides a user-friendly interface. Prophet incorporates seasonality, holidays, and special events, allowing users to model complex temporal patterns easily. Its strengths lie in handling missing data and outliers gracefully. By decomposing time series into trend, seasonality, and holidays, Prophet offers an intuitive approach to forecasting, making it accessible for users with varying levels of expertise.
+
+[**Keras Package in R for Stock Price Forecast**]{style="text-decoration: underline; text-align: center;"}\
+The Keras package in R is a high-level neural networks API that runs on top of the TensorFlow or Theano backend. It is well-suited for building and training deep learning models, making it applicable for stock price forecasting. With Keras, users can construct complex neural network architectures, including Long Short-Term Memory (LSTM) networks, commonly used for sequence prediction tasks. Fine-tuning hyperparameters, such as learning rate, batch size, epochs, and model architecture, plays a crucial role in optimizing forecasting accuracy.
+:::
+:::
+
+## 2. Loading Required Libraries
+
+The purpose of loading a library is explained briefly in every line of library
+
+```{r}
+#| message: false
+#| warning: false
+#| echo: true
+
+library(tidyverse)    # used for pipe function i.e. %>%
+library(quantmod)     # for getSymbols function to get prices from yahoo
+library(keras)        # to build LSTM model
+library(prophet)      # for prophet function Prophet package
+library(xts)          # to create xts object in Prophet package
+library(htmltools)    # formatting chart titles we use HTML - this library is for that
+library(dygraphs)     # dygraphs function is to create interactive plot using dygraphs package
+
+```
+
+## 3. Define / Declare Parameters
+
+```{r}
+#| message: false
+#| warning: false
+#| echo: true
+
+# Selected Apple Stock
+symbols   <- c("AAPL")  
+
+# We take two years data for our analysis
+mStartDt  <- "2021-11-30"
+mEndDt    <- "2023-11-30"
+
+# Prediction 30 days from 1st Dec 2023
+mPredictionDays <- 30
+
+# No. of days to be displayed on the plot for better clarify on visualization
+mDaysPriortoForecast <- 240
+```
+
+## 4. Get Stock Price from Yahoo Finance
+
+```{r}
+#| message: false
+#| warning: false
+#| echo: true
+
+pricesdf <-
+  getSymbols(symbols,
+             src = 'yahoo',
+             from = mStartDt,
+             to = mEndDt,
+             auto.assign = TRUE,
+             warnings = FALSE) %>%
+  map(~Ad(get(.))) %>%
+  purrr::reduce(merge) %>%
+  `colnames<-`(symbols)
+
+# Remove NAs in the dataset
+    pricesdf <- na.omit(pricesdf)
+head(pricesdf, 5)
+```
+
+## 5. Function to Normalize and Un-normalize
+
+```{r}
+#| message: false
+#| warning: false
+#| echo: true
+
+# Define the custom normalization function
+    normalize_custom <- function(x, mean_price, sd_price) {
+      # Check if mean and standard deviation are provided
+      if (missing(mean_price) || missing(sd_price)) {
+        stop("Please provide both mean and standard deviation for normalization!")
+      }
+      
+      # Apply the normalization formula
+      return((x - mean_price) / sd_price)
+    }
+
+# Define function to un-normalize forecast data
+    unnormalize_custom <- function(x, mean_price, sd_price) {
+      # Check if mean and standard deviation are provided
+      if (missing(mean_price) || missing(sd_price)) {
+        stop("Please provide both mean and standard deviation used for normalization!")
+      }
+      
+      # Apply the un-normalization formula
+      return(x * sd_price + mean_price)
+    }
+```
+
+## 6. Prophet Package
+
+**Steps to Forecast Stock Prices using Prophet Package**
+
+1.  Collect historical stock price data.
+2.  Ensure it has a column named **`ds`** for dates and another column named **`y`** for the corresponding stock prices.
+3.  Create a Prophet object and add your data to it.
+4.  Fit the model with your stock price data.
+5.  Use the fitted model to make predictions.
+6.  Evaluate the performance of your model using appropriate metrics. You can compare predicted values with actual values and assess accuracy.
+
+------------------------------------------------------------------------
+
+```{r}
+#| message: false
+#| warning: false
+#| echo: true
+
+    df <-  data.frame(ds=index(pricesdf),y = as.numeric(pricesdf))
+    model <- prophet(df,daily.seasonality=TRUE,yearly.seasonality=FALSE)
+    future_price <- make_future_dataframe(model, periods =mPredictionDays)
+    forecastdf <- predict(model,future_price)
+    
+    # Assuming 'forecastdf' is your forecast object
+    forecasted_data <- data.frame(date = forecastdf$ds, forecasted_prices = forecastdf$yhat)
+    
+
+    # Convert the 'Date' column to a Date class
+    mactualsdf <- data.frame(ds=as.Date(df$ds, format = "%Y-%m-%d"),y=df$y)
+    
+    forecastselectcoldf <- forecastdf[,c('ds','yhat',"yhat_upper","yhat_lower")]
+    merged_data <- merge(x = forecastselectcoldf,y = mactualsdf, by = "ds", all.x = TRUE)
+
+    # Create the xts object
+    combined_Dygraph_xts2 <- xts(merged_data[, -which(names(merged_data) == 'ds')], order.by = merged_data$ds)
+    
+    # forecast period
+    mFcastStartDate <- as.Date(index(pricesdf)[nrow(pricesdf)])+1
+    end_date <- mFcastStartDate + mPredictionDays  # Next 30 days
+    
+    
+    head(combined_Dygraph_xts2,3)
+    
+```
+
+### 6.1 Evaluation of Prophet model
+
+We could compare the actual price and projected price using prophet model. The dygraph plot (below), shows projection and forecast in Red, actual prices as black dots and other two blue lines are upper and lower bounds of the forecast. From there you will understand, how close is the projection in line with actuals
+
+------------------------------------------------------------------------
+
+```{r}
+#| message: false
+#| warning: false
+#| echo: true
+#| fig-format: png
+#| fig-width: 12
+#| fig-asp: 0.70
+
+      mMainTitle <- HTML(paste(symbols, "Stock Closing Price & Forecast Price using  Prophet Package"))
+    combined_Dygraph_xts2 <- combined_Dygraph_xts2 %>% subset(index(combined_Dygraph_xts2) >= as.Date(mFcastStartDate-mDaysPriortoForecast))
+    
+     dygraph(combined_Dygraph_xts2, main = mMainTitle) %>% 
+      dySeries('y', label = "Closing Price",
+              drawPoints = TRUE,strokeWidth=0,
+               pointSize = 2, pointShape = "dot") %>%
+      dySeries('yhat', label = "Forecast Price",strokeWidth = 1.25) %>%
+      dySeries('yhat_upper', label = "Upper Bound",strokeWidth = 1) %>%
+      dySeries('yhat_lower', label = "Lower Bound",strokeWidth = 1) %>%
+      dyOptions(colors = c("black", "red", "#189AB4","#189AB4"),fillGraph = TRUE,fillAlpha = 0.10) %>%
+      dyShading(from =  mFcastStartDate, to =  end_date, color = "#A7FCEF") %>%
+      dyLegend(show = "onmouseover", hideOnMouseOut = TRUE) %>%
+      dyRangeSelector()
+
+```
+
+## 7. Stock Price forecasting in R keras Package
+
+**Steps to Forecast Stock Prices using Keras Package**
+
+1.  Collect historical stock price data.
+2.  Normalize the data to ensure that all features are on a similar scale.
+3.  Splitting Dataset (Training and Testing).
+4.  Building Model using keras package.
+5.  Train the model using the training dataset.
+6.  Compile the model using compile function with loss argument
+7.  Fine-tune hyperparameters to improve forecasting accuracy, say epochs and batch_size in fit function.
+8.  Use the trained model to make predictions on unseen data (future stock prices).
+
+------------------------------------------------------------------------
+
+```{r}
+#| message: false
+#| warning: false
+#| echo: true
+
+ stock_data <- pricesdf
+ mean_price <- mean(stock_data)
+    sd_price<- sd(stock_data)
+    
+    stock_data_normalized <- normalize_custom(stock_data, mean_price, sd_price)
+
+    # Define parameters
+    sequence_length <- 10
+    epochs <- 50  # The number of epochs is a hyperparameter that determines how many times the learning algorithm will work through the entire training dataset. 
+    
+    # Create sequences for input and output
+    create_sequences <- function(data, sequence_length) {
+      data_numeric <- as.numeric(data)
+      x <- y <- matrix(ncol = sequence_length, nrow = length(data_numeric) - sequence_length + 1)
+      for (i in seq_len(nrow(x))) {
+        x[i, ] <- data_numeric[i:(i + sequence_length - 1)]
+        y[i] <- data_numeric[i + sequence_length]
+      }
+      return(list(x = x, y = y))
+    }
+    
+    # Create sequences
+     sequences <- create_sequences(stock_data_normalized, sequence_length)
+    
+    # Split data into training and testing sets
+    set.seed(123)
+    split_index <- floor(0.8 * nrow(sequences$x))
+    x_train <- sequences$x[1:split_index, , drop = FALSE]
+    y_train <- sequences$y[1:split_index]
+    x_test <- sequences$x[(split_index + 1):nrow(sequences$x), , drop = FALSE]
+    y_test <- sequences$y[(split_index + 1):nrow(sequences$x)]
+    
+    
+    # Build LSTM model
+    model <- keras_model_sequential() %>%
+      layer_lstm(units = 50, input_shape = c(sequence_length, 1)) %>%
+      layer_dense(units = 1)
+
+    # Compile the model
+    model %>% compile(
+      loss = 'mean_squared_error',
+      optimizer = optimizer_adam()
+    )
+    
+    # Train the model
+    model %>% fit(x_train, y_train, 
+                  epochs = epochs, 
+                  batch_size = 32, 
+                  verbose = 0, # Set to 0 to suppress progress bar and training information
+                  validation_split = 0.1)
+
+    # forecast period
+    mFcastStartDate <- as.Date(index(stock_data)[nrow(stock_data)])+1
+    end_date <- mFcastStartDate + mPredictionDays  # Next 30 days
+    # Get today's date as numeric vector
+    today_vec <- as.Date(Sys.Date())
+    # Create a sequence of dates by adding 1 day for 30 times
+    date_sequence <- mFcastStartDate + (1:mPredictionDays)
+
+    last_sequence <- tail(stock_data_normalized, sequence_length)
+    x_newdata <- array(last_sequence, dim = c(mPredictionDays, sequence_length))
+    mforecast <- model %>% predict(x_newdata)
+
+    forecast_rescaled <- unnormalize_custom(mforecast, mean_price, sd_price)
+    forecast_rescaled_xts <- xts(forecast_rescaled,order.by = date_sequence)
+    names(forecast_rescaled_xts) <- c('Act_Pred')
+
+    combined_LSTM_data <- rbind(stock_data, forecast_rescaled_xts)
+```
+
+## 8. Evaluation of RNNS & LSTMS Model using MSE
+
+**Mean Squared Error (MSE):** In stock price forecasting using the Keras package in RStudio, Mean Squared Error (MSE) is a commonly used metric to evaluate the performance of your model on test data. MSE measures the average squared difference between the predicted and actual values. The MSE provides a measure of how well your model's predictions align with the actual values. A lower MSE indicates better predictive performance.
+
+------------------------------------------------------------------------
+
+```{r}
+#| message: false
+#| warning: false
+#| echo: true
+    msetest <- model %>% evaluate(x_test[-nrow(x_test),], na.omit(y_test))
+    cat("Mean Squared Error on Test Data:", round(msetest,3), "\n")
+    
+    msetrain <- model %>% evaluate(x_train, y_train)
+    cat("Mean Squared Error on Train Data:", round(msetrain,3), "\n")
+```
+
+------------------------------------------------------------------------
+
+**Interpretation of MSE on Train Data Vs MSE on Test Data:** Comparing Mean Squared Error (MSE) on both training and test data is a valuable practice in assessing the performance of your machine learning model. Here's a simple guideline for interpreting the comparison:
+
+1.  If MSE is low on both training and test data: The model is likely a good fit and generalizes well.
+2.  If MSE is low on training data but high on test data: Overfitting may be occurring. Consider adjusting the model complexity, regularization, or gathering more diverse training data.
+3.  If MSE is high on both training and test data: The model may be too simple (underfitting). You might need a more complex model or additional features.
+
+## 9. Combining Forecasted Stock Prices of both models
+
+We could combine the forecasted stock prices under both packages and presented is in Dygraph.
+
+```{r}
+#| message: false
+#| warning: false
+#| echo: true
+
+    mTwoPackage_Combined_xts <- merge(combined_Dygraph_xts2,combined_LSTM_data)
+    names(mTwoPackage_Combined_xts)[5] <- "LSTM_Forecast"
+   
+    mMainTitle <- HTML(paste(symbols, "Stock :: Closing & Forecast Prices",'<br>','Shaded Area represents Forecasted Prices'))
+    
+    
+    for (i in 1:nrow(mTwoPackage_Combined_xts)){
+      if(!is.na(mTwoPackage_Combined_xts$y[i])==TRUE){
+        mTwoPackage_Combined_xts$yhat[i] <- NA
+        mTwoPackage_Combined_xts$LSTM_Forecast[i] <- NA
+        mTwoPackage_Combined_xts$yhat_upper[i] <- NA
+        mTwoPackage_Combined_xts$yhat_lower[i] <- NA
+      }
+    }
+    
+    mTwoPackage_Combined_xts <- mTwoPackage_Combined_xts %>% subset(index(mTwoPackage_Combined_xts) >= as.Date(mFcastStartDate-mDaysPriortoForecast))
+
+```
+
+------------------------------------------------------------------------
+
+## 10. Dygraph Plot-with Forecasted Stock Prices using both Prophet and Keras Packages
+
+```{r}
+#| message: false
+#| warning: false
+#| echo: true
+#| fig-format: png
+#| fig-width: 12
+#| fig-asp: 0.70
+
+    dygraph(mTwoPackage_Combined_xts, main = mMainTitle) %>% 
+      dySeries('y', label = "Closing Price",
+               stemPlot = TRUE,color = 'darkgreen',fillGraph = TRUE,
+               drawPoints = TRUE,strokeWidth=0,
+               pointSize = 2, pointShape = "dot") %>%
+      dySeries('yhat', label = "Prophet Forecast",strokeWidth = 1.4) %>%
+      dySeries('yhat_upper', label = "Prophet Upper Bound",strokeWidth = 1) %>%
+      dySeries('yhat_lower', label = "Prophet Lower Bound",strokeWidth = 1) %>%
+      dySeries('LSTM_Forecast', label = "LSTM Forecast",strokeWidth = 1.4) %>%
+      dyOptions(colors = c("darkgreen", "red", "#189AB4","#189AB4",'#8F00FF'),
+                fillGraph = FALSE,fillAlpha = 0.10, axisLabelFontSize = 14) %>%
+      dyShading(from = mFcastStartDate, to = end_date, color = "#A7FCEF") %>%
+      dyLegend(show = "onmouseover", hideOnMouseOut = TRUE) %>%
+      dyRangeSelector()
+```
+
+------------------------------------------------------------------------
