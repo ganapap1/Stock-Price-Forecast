@@ -293,7 +293,7 @@ We could compare the actual price and projected price using prophet model. The d
     combined_LSTM_data <- rbind(stock_data, forecast_rescaled_xts)
 ```
 
-## 8. Evaluation of RNNS & LSTMS Model using MSE
+## 8. Evaluation of RNNS & LSTM Model using MSE
 
 **Mean Squared Error (MSE):** In stock price forecasting using the Keras package in RStudio, Mean Squared Error (MSE) is a commonly used metric to evaluate the performance of your model on test data. MSE measures the average squared difference between the predicted and actual values. The MSE provides a measure of how well your model's predictions align with the actual values. A lower MSE indicates better predictive performance.
 
